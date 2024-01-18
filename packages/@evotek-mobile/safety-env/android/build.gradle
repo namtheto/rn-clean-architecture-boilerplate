@@ -1,0 +1,323 @@
+import java.nio.file.Paths
+
+static def findNodeModulePath(baseDir, packageName = null) {
+  def basePath = baseDir.toPath().normalize()
+  // Node's module resolution algorithm searches up to the root directory,
+  // after which the base path will be null
+  while (basePath) {
+    def candidatePath = Paths.get(basePath.toString(), "node_modules")
+
+    if (packageName) {
+      candidatePath = Paths.get(candidatePath.toString(), packageName)
+    }
+
+    if (candidatePath.toFile().exists()) {
+      return candidatePath.toString()
+    }
+    basePath = basePath.getParent()
+  }
+  return null
+}
+
+def resolveBuildType() {
+  Gradle gradle = getGradle()
+  String tskReqStr = gradle.getStartParameter().getTaskRequests()['args'].toString()
+
+  return tskReqStr.contains('Release') ? 'release' : 'debug'
+}
+
+def nodeModulesDir = findNodeModulePath(projectDir)
+def reactNativeDir = findNodeModulePath(projectDir, "react-native")
+def reactProperties = new Properties()
+file("$reactNativeDir/ReactAndroid/gradle.properties").withInputStream { reactProperties.load(it) }
+
+def REACT_NATIVE_MAJOR_VERSION = reactProperties.getProperty("VERSION_NAME").split("\\.")[1].toInteger()
+
+def found = false
+def sourceBuild = false
+def defaultDir = null
+def androidSourcesDir = file("$reactNativeDir/android").parentFile.toString()
+def androidSourcesName = 'React Native sources'
+
+if (rootProject.ext.has('reactNativeAndroidRoot')) {
+  defaultDir = rootProject.ext.get('reactNativeAndroidRoot')
+  androidSourcesDir = defaultDir.parentFile.toString()
+} else if (findProject(":ReactAndroid")) {
+  sourceBuild = true
+  defaultDir = findProject(":ReactAndroid").projectDir
+  androidSourcesDir = defaultDir.parentFile.toString()
+} else {
+  defaultDir = file("$reactNativeDir/android")
+  androidSourcesDir = defaultDir.parentFile.toString()
+}
+
+if (!defaultDir.exists()) {
+  throw new GradleException(
+    "${project.name}: React Native android directory (node_modules/react-native/android) does not exist! Resolved node_modules to: ${nodeModules}"
+  )
+}
+
+def prebuiltDir = sourceBuild ? "$reactNativeDir/ReactAndroid/src/main/jni/prebuilt/lib" : "$buildDir/react-native-0*/jni"
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath 'com.android.tools.build:gradle:7.3.1'
+  }
+}
+
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+}
+
+apply plugin: 'com.android.library'
+
+if (isNewArchitectureEnabled()) {
+  apply plugin: 'com.facebook.react'
+}
+
+def getExtOrDefault(name) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : project.properties['SafetyEnv_' + name]
+}
+
+def getExtOrIntegerDefault(name) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties['SafetyEnv_' + name]).toInteger()
+}
+
+android {
+  ndkVersion getExtOrDefault('ndkVersion')
+  compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
+
+  if (REACT_NATIVE_MAJOR_VERSION >= 71) {
+    buildFeatures {
+      prefab true
+    }
+  }
+
+  defaultConfig {
+    minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+    targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')
+    buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+    externalNativeBuild {
+      cmake {
+        cppFlags "-O2 -frtti -fexceptions -Wall -fstack-protector-all -DONANDROID -std=c++17"
+        abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+        arguments '-DANDROID_STL=c++_shared',
+          "-DRN_MAJOR_VERSION=$REACT_NATIVE_MAJOR_VERSION",
+          "-DNODE_MODULES_DIR=$nodeModulesDir",
+          "-DPREBUILT_DIR=$prebuiltDir"
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+      version "3.22.1"
+    }
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+    }
+  }
+
+  lintOptions {
+    disable 'GradleCompatible'
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+
+  packagingOptions {
+    excludes = ["**/libc++_shared.so", "**/libfbjni.so", "**/libreactnativejni.so", "**/libjsi.so", "**/MANIFEST.MF"]
+  }
+}
+
+repositories {
+  mavenCentral()
+  google()
+
+  if (defaultDir.exists()) {
+    maven {
+      url defaultDir.toString()
+      name androidSourcesName
+    }
+
+    logger.info(":${project.name}:reactNativeAndroidRoot ${defaultDir.canonicalPath}")
+    found = true
+  } else {
+    def parentDir = rootProject.projectDir
+
+    1.upto(5, {
+      if (found) return true
+      parentDir = parentDir.parentFile
+
+      def androidPrebuiltBinaryDir = file("$parentDir/node_modules/react-native/android")
+
+      if (androidPrebuiltBinaryDir.exists()) {
+        maven {
+          url androidPrebuiltBinaryDir.toString()
+          name androidSourcesName
+        }
+
+        logger.info(":${project.name}:reactNativeAndroidRoot ${androidPrebuiltBinaryDir.canonicalPath}")
+        found = true
+      } else if (androidSourcesDir.exists()) {
+        maven {
+          url androidSourcesDir.toString()
+          name androidSourcesName
+        }
+
+        logger.info(":${project.name}:reactNativeAndroidRoot ${androidSourcesDir.canonicalPath}")
+        found = true
+      }
+    })
+  }
+
+  if (!found) {
+    throw new GradleException(
+      "${project.name}: unable to locate React Native android sources. " +
+        "Ensure you have you installed React Native as a dependency in your project and try again."
+    )
+  }
+}
+
+
+dependencies {
+  //noinspection GradleDynamicVersion
+  if (REACT_NATIVE_MAJOR_VERSION >= 71) {
+    implementation "com.facebook.react:react-android" // version substituted by RNGP
+  } else {
+    implementation "com.facebook.react:react-native:+" // From node_modules
+  }
+
+  if (!sourceBuild) {
+    def buildType = "debug"
+    tasks.all({ task ->
+      if (task.name == "buildCMakeRelease") {
+        buildType = "release"
+      }
+    })
+
+    if (REACT_NATIVE_MAJOR_VERSION < 71) {
+      def rnAarMatcher = "**/react-native/**/*${buildType}.aar"
+      if (REACT_NATIVE_MAJOR_VERSION < 69) {
+        rnAarMatcher = "**/**/*.aar"
+      }
+
+      def rnAAR = fileTree("${defaultDir.toString()}").matching({ it.include rnAarMatcher }).singleFile
+      files(rnAAR).each {
+        def file = it.absoluteFile
+        def aarFolder = new File("$buildDir/../$file.name");
+        if (aarFolder.exists()) return;
+        copy {
+          from zipTree(file)
+          into "$buildDir/$file.name"
+          include "jni/**/*"
+        }
+      }
+    }
+  }
+}
+
+if (isNewArchitectureEnabled()) {
+  react {
+    jsRootDir = file("../src/")
+    libraryName = "RNSafetyEnv"
+    codegenJavaPackageName = "com.reactnativesafetyenv"
+  }
+}
+
+def generatedEnvDir = file("$buildDir/cpp/generated")
+
+task generateEmptyEnv() {
+  // Remove the generated files from the previous build
+  if (generatedEnvDir.exists()) {
+    generatedEnvDir.deleteDir()
+    generatedEnvDir.mkdirs()
+  } else {
+    generatedEnvDir.mkdirs()
+  }
+}
+
+// Task to generate the cpp and h files from .env file
+task generateEnv(dependsOn: generateEmptyEnv) {
+  def fileName = ".env"
+  // Get env type from BUILD_ENV environment variable
+  def envType = System.getenv("BUILD_ENV")
+
+  if (envType != null) {
+    fileName = ".env.${envType}"
+  }
+
+  def envFile = file("${nodeModulesDir}/../../../../${fileName}")
+
+  if (!envFile.exists()) {
+    throw new GradleException("""${project.name}: We need your ${fileName} file to inject environment variables, please place a ${fileName} file on the module's parent directory""")
+  }
+  // Read content of env file and split it by line
+  def envFileContent = envFile.text
+  def envFileLines = envFileContent.split("\\r?\\n")
+  def envMap = new HashMap<String, String>()
+
+  envFileLines.each { currentEnvVar ->
+    // Skip empty lines or comments
+    if (currentEnvVar == "" || currentEnvVar.startsWith("#")) {
+      return
+    }
+
+    def currentEnvVarAttributes = currentEnvVar.replace("export ", "").split("=")
+    envMap.put(currentEnvVarAttributes[0], currentEnvVarAttributes[1])
+  }
+  file("$generatedEnvDir/SafetyEnv-Generated.h").text = """// DO NOT EDIT, it was generated from the .env file
+#ifndef SAFETYENV_GENERATED_H
+#define SAFETYENV_GENERATED_H
+
+#include <string>
+#include <map>
+
+class SafetyEnv_Generated {
+  public:
+    static std::map<std::string, std::string> getEnvMap();
+};
+
+#endif // SAFETYENV_GENERATED_H
+""".stripIndent()
+
+  file("$generatedEnvDir/SafetyEnv-Generated.cpp").text = """// DO NOT EDIT, it was generated from the .env file
+#include "SafetyEnv-Generated.h"
+
+std::map<std::string, std::string> SafetyEnv_Generated::getEnvMap() {
+  std::map<std::string, std::string> envMap;
+
+${envMap.collect { "\tenvMap[\"${it.key.replace("SENSE_", "")}\"] = \"${it.value}\";" }.join("\n")}
+
+  return envMap;
+}
+""".stripIndent()
+}
+
+def nativeBuildDependsOn(dependsOnTask) {
+  def buildTasks = tasks.findAll({ task ->
+    (
+      !task.name.contains("Clean")
+        && (task.name.contains("externalNative")
+        || task.name.contains("CMake")
+        || task.name.contains("generateJsonModel")
+      )
+    )
+  })
+  buildTasks.forEach { task -> task.dependsOn(dependsOnTask) }
+}
+
+afterEvaluate {
+  nativeBuildDependsOn(generateEmptyEnv)
+}

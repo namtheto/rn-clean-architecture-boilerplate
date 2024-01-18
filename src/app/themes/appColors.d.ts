@@ -1,0 +1,37 @@
+export interface IAppColors {
+  white: string;
+  black: string;
+  placeholder: string;
+  colorADADBD: string;
+  colorE5E5EE: string;
+  color9B9FA2: string;
+  colorF6F7F9: string;
+  color19181C: string;
+  newPrimary: string;
+  colorDBE2EA: string;
+  colorFF6960: string;
+  color575756: string;
+  color707070: string;
+  color2C3A45: string;
+  textColor: string;
+  background: string;
+  colorSecondary: string;
+  titleColor: string;
+  bgButtonLanguage: string;
+  nameCardColor: string;
+  grey: string;
+  colorMiddle: string;
+  backgroundFace: string;
+  iconSelfie: string;
+  textColorButton: string;
+  deepBlue: string;
+  greenPrimary: string;
+  greenPrimary2x: string;
+  yellowPrimary: string;
+  bluePrimary: string;
+  greenBackground: string;
+  redBackground: string;
+  blueBackground: string;
+  yellowBackground: string;
+  purpleBackground: string;
+}

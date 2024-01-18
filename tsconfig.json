@@ -1,0 +1,18 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "include": ["./node_modules/redux-persist/types"],
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "@root/*": ["*"],
+      "@app/*": ["app/*"],
+      "@assets/*": ["presentation/assets/*"],
+      "@components/*": ["presentation/components/*"],
+      "@features/*": ["presentation/features/*"],
+      "@navigation/*": ["presentation/navigation/*"],
+      "@services/*": ["data/services/*"]
+    },
+    "experimentalDecorators": true,
+    "noImplicitOverride": true
+  }
+}

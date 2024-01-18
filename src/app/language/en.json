@@ -1,0 +1,18 @@
+{
+  "hello_world": "Hello World",
+  "hello_world_desc": "Say hello to the amazing things below 🚀🚀🚀",
+  "qr_code_is_invalid": "Niêm fly to the moon 🚀🚀🚀",
+  "coming_soon": "Coming soon",
+  "back": "Back",
+  "log_out": "Logout",
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "notification": "Notification",
+  "home": "Home",
+  "scan": "Scan",
+  "history": "History",
+  "overview": "Overview",
+  "more": "More",
+  "something_went_wrong": "Something went wrong",
+  "error_default": "An error occurred from the system. Please try again later!"
+}

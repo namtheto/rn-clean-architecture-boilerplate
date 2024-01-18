@@ -1,0 +1,41 @@
+def loadEnvToGradle() {
+  def envFileName = ".env"
+
+  def buildEnv = System.getenv("BUILD_ENV")
+  if (buildEnv) {
+    envFileName = ".env.${buildEnv}"
+  }
+
+  def envFile = file("${project.rootDir}/../${envFileName}")
+  def env = [:]
+
+  if (envFile.exists()) {
+    println "Loading environment variables from ${envFileName}"
+    envFile.readLines().each { line ->
+      def (key, value) = line.tokenize("=")
+      if (key && value) {
+        // If key contains "SENSE_", then don't set it
+        if (key.contains("SENSE_")) {
+          println "Skipping sensitive environment variable: ${key}"
+        } else {
+          println "Setting environment variable ${key} to ${value}"
+          env["SAFETY_ENV_${key}"] = value
+        }
+      }
+    }
+  }
+
+  project.ext.set("env", env)
+}
+
+loadEnvToGradle()
+
+// Thanks for react native config [https://github.com/luggit/react-native-config/blob/f743bcebd751d1fd492e6b17cb54a02462e67134/android/dotenv.gradle#L69]
+android {
+  defaultConfig {
+    project.env.each { k, v ->
+      def escaped = v.replaceAll("%","\\\\u0025")
+      resValue "string", k, "\"$escaped\""
+    }
+  }
+}
